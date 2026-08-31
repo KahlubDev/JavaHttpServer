@@ -2,6 +2,7 @@ package com.example.server;
 
 import java.io.*;
 import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 
@@ -15,43 +16,169 @@ public class RequestHandler implements Runnable {
     @Override
     public void run() {
         try (
-                BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()), true)
+                BufferedReader in = new BufferedReader(
+                        new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                PrintWriter out = new PrintWriter(
+                        new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true)
         ) {
-            // 1. Read the first line of the request (e.g., "GET / HTTP/1.1")
             String requestLine = in.readLine();
-            if (requestLine == null) return;
-
-            System.out.println(" Received: " + requestLine);
-
-            // 2. Consume the rest of the headers (we don't need them for this demo)
-            while (in.readLine() != null && !in.readLine().isEmpty()) {
-                // Just skipping headers
+            if (requestLine == null) {
+                return;
             }
 
-            // 3. Prepare the HTML Response
-            String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
-            String htmlBody = "<!DOCTYPE html><html><body>" +
-                    "<h1> Success! Java HTTP Server is working.</h1>" +
-                    "<p>Server received your request at: <b>" + timestamp + "</b></p>" +
-                    "<p>Request: " + requestLine + "</p>" +
-                    "</body></html>";
+            System.out.println("Received: " + requestLine);
 
-            // 4. Send HTTP Headers + Body
-            String response = "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: text/html; charset=UTF-8\r\n" +
-                    "Content-Length: " + htmlBody.getBytes("UTF-8").length + "\r\n" +
-                    "Connection: close\r\n" +
-                    "\r\n" + // Empty line separates headers from body
-                    htmlBody;
+            String[] parts = requestLine.split(" ");
+            String method = parts[0];
+            String path = parts.length > 1 ? parts[1] : "/";
 
-            out.print(response);
-            out.flush();
+            // Consume HTTP headers (stop at empty line)
+            String line;
+            while ((line = in.readLine()) != null && !line.isEmpty()) {
+                // Skip header lines
+            }
+
+            // Route handling
+            if ("GET".equals(method)) {
+                handleGet(out, path);
+            } else if ("POST".equals(method)) {
+                handlePost(out, path, in);
+            } else {
+                sendError(out, 405, "Method Not Allowed");
+            }
 
         } catch (IOException e) {
-            System.err.println(" Error handling client: " + e.getMessage());
+            System.err.println("Error handling client: " + e.getMessage());
         } finally {
-            try { socket.close(); } catch (IOException e) { /* ignore */ }
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // Ignore close errors
+            }
         }
+    }
+
+    private void handleGet(PrintWriter out, String path) {
+        // Check if the path maps to a static file
+        try {
+            if (serveStaticFile(out, path)) {
+                return; // File was served, stop here
+            }
+        } catch (IOException e) {
+            System.err.println("Error serving file: " + e.getMessage());
+        }
+
+        // Fallback to dynamic routes if file not found
+        if ("/".equals(path)) {
+            String body = "<h1>Home Page</h1><p>Welcome to the Java HTTP Server.</p>";
+            sendHtml(out, 200, "OK", body);
+        } else if ("/api/time".equals(path)) {
+            String time = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+            String body = "<h1>Server Time</h1><p>" + time + "</p>";
+            sendHtml(out, 200, "OK", body);
+        } else if ("/about".equals(path)) {
+            String body = "<h1>About</h1><p>This is a custom Java HTTP server.</p>";
+            sendHtml(out, 200, "OK", body);
+        } else {
+            sendError(out, 404, "Not Found");
+        }
+    }
+
+    private boolean serveStaticFile(PrintWriter out, String path) throws IOException {
+        // Map "/" to "index.html"
+        String filePath = path;
+        if ("/".equals(path)) {
+            filePath = "/index.html";
+        }
+
+        // Security: Prevent directory traversal (e.g., ../../etc/passwd)
+        if (filePath.contains("..") || filePath.contains("\\")) {
+            System.out.println("Blocked path: " + path);
+            return false;
+        }
+
+        // Load file from resources (webroot is in resources)
+        String resourcePath = "webroot" + filePath;
+
+        InputStream inputStream = getClass().getClassLoader().getResourceAsStream(resourcePath);
+
+        if (inputStream != null) {
+            byte[] fileBytes = inputStream.readAllBytes();
+            inputStream.close();
+
+            // Determine content type (simple check)
+            String contentType = "text/html";
+            if (filePath.endsWith(".css")) {
+                contentType = "text/css";
+            } else if (filePath.endsWith(".js")) {
+                contentType = "application/javascript";
+            } else if (filePath.endsWith(".png")) {
+                contentType = "image/png";
+            } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg")) {
+                contentType = "image/jpeg";
+            } else if (filePath.endsWith(".gif")) {
+                contentType = "image/gif";
+            }
+
+            // Build HTTP Headers
+            String responseHeaders = "HTTP/1.1 200 OK\r\n" +
+                    "Content-Type: " + contentType + "\r\n" +
+                    "Content-Length: " + fileBytes.length + "\r\n" +
+                    "Connection: close\r\n" +
+                    "\r\n";
+
+            // Write headers using PrintWriter
+            out.print(responseHeaders);
+            out.flush();
+
+            // Write body bytes directly to the socket's output stream
+            // We use the raw socket stream to handle binary data correctly
+            socket.getOutputStream().write(fileBytes);
+            socket.getOutputStream().close(); // Close after writing
+
+            return true;
+        }
+
+        return false; // File not found, let handleGet continue
+    }
+
+    private void handlePost(PrintWriter out, String path, BufferedReader in) throws IOException {
+        if ("/api/echo".equals(path)) {
+            StringBuilder bodyContent = new StringBuilder();
+            String line;
+            while ((line = in.readLine()) != null && !line.isEmpty()) {
+                bodyContent.append(line);
+            }
+            String body = "<h1>Echo Response</h1><pre>" + escapeHtml(bodyContent.toString()) + "</pre>";
+            sendHtml(out, 200, "OK", body);
+        } else {
+            sendError(out, 404, "Not Found");
+        }
+    }
+
+    private void sendHtml(PrintWriter out, int status, String statusText, String body) {
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+
+        String response = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
+                "Content-Type: text/html; charset=UTF-8\r\n" +
+                "Content-Length: " + bodyBytes.length + "\r\n" +
+                "Connection: close\r\n" +
+                "\r\n";
+
+        out.print(response);
+        out.write(body);
+        out.flush();
+    }
+
+    private void sendError(PrintWriter out, int status, String message) {
+        String body = "<h1>Error " + status + "</h1><p>" + message + "</p>";
+        sendHtml(out, status, message, body);
+    }
+
+    private String escapeHtml(String input) {
+        return input.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;");
     }
 }
