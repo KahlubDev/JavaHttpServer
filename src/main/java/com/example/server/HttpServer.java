@@ -9,22 +9,26 @@ import java.util.concurrent.TimeUnit;
 
 public class HttpServer {
     private static final int PORT = 8080;
-    private static final int MAX_THREADS = 50; // Limit concurrent threads
+    private static final int MAX_THREADS = 50; // Sufficient for a simple server
 
     public static void main(String[] args) {
-        System.out.println("Starting Java HTTP Server on port " + PORT + "...");
-        System.out.println("Thread Pool size: " + MAX_THREADS + " threads");
+        Logger.info("Starting Java HTTP Server on port " + PORT + "...");
+        Logger.info("Thread Pool size: " + MAX_THREADS + " threads");
 
         ExecutorService threadPool = Executors.newFixedThreadPool(MAX_THREADS);
 
         try (ServerSocket serverSocket = new ServerSocket(PORT)) {
             while (true) {
                 Socket clientSocket = serverSocket.accept();
-                // Submit the task to the thread pool instead of creating a new thread
+                Logger.info("New client connected: " + clientSocket.getInetAddress().getHostAddress());
+
+                // Submit task to the pool instead of creating a new thread
                 threadPool.execute(new RequestHandler(clientSocket));
             }
         } catch (IOException e) {
-            System.err.println("Server error: " + e.getMessage());
+            Logger.error("Server error", e);
+        } finally {
+            Logger.info("Shutting down server...");
             threadPool.shutdown();
             try {
                 if (!threadPool.awaitTermination(5, TimeUnit.SECONDS)) {
