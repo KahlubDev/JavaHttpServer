@@ -1,4 +1,3 @@
-````md
 ### Java HTTP Server
 
 A lightweight, multi-threaded HTTP server built from scratch using core Java.
@@ -36,7 +35,7 @@ The project implements HTTP request handling over TCP sockets, manual request pa
 
 ## Project Structure
 
-```text
+
 JavaHttpServer/
 ├── src/
 │   └── main/
@@ -54,7 +53,7 @@ JavaHttpServer/
 │
 ├── README.md
 └── .gitignore
-````
+
 
 ### Core Components
 
