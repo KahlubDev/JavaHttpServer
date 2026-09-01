@@ -35,10 +35,10 @@ public class RequestHandler implements Runnable {
             String method = parts[0];
             String path = parts.length > 1 ? parts[1] : "/";
 
-            // Consume HTTP headers (stop at empty line)
+            // Consume HTTP headers
             String line;
             while ((line = in.readLine()) != null && !line.isEmpty()) {
-                // Skip header lines
+                // Skip headers
             }
 
             // Route handling
@@ -62,16 +62,16 @@ public class RequestHandler implements Runnable {
     }
 
     private void handleGet(PrintWriter out, String path) {
-        // Check if the path maps to a static file first
+        // Check static files first
         try {
             if (serveStaticFile(out, path)) {
-                return; // File was served, stop here
+                return;
             }
         } catch (IOException e) {
             System.err.println("Error serving file: " + e.getMessage());
         }
 
-        // Split path and query string (e.g., "/api/user?name=John" -> path="/api/user", query="name=John")
+        // Split path and query string
         String[] parts = path.split("\\?", 2);
         String cleanPath = parts[0];
         String queryString = parts.length > 1 ? parts[1] : "";
@@ -80,52 +80,58 @@ public class RequestHandler implements Runnable {
 
         // Route handling
         if ("/".equals(cleanPath)) {
-            String body = "<h1>Home Page</h1><p>Welcome to the Java HTTP Server.</p>";
+            // Serve static index.html (handled above) or fallback
+            String body = "<h1>Home Page</h1><p>Use <b>/api/time</b> or <b>/api/user?name=...</b> for API.</p>";
             sendHtml(out, 200, "OK", body);
         } else if ("/api/time".equals(cleanPath)) {
             String time = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-            String body = "<h1>Server Time</h1><p>" + time + "</p>";
-            sendHtml(out, 200, "OK", body);
-        } else if ("/about".equals(cleanPath)) {
-            String body = "<h1>About</h1><p>This is a custom Java HTTP server.</p>";
-            sendHtml(out, 200, "OK", body);
+            Map<String, String> data = new HashMap<>();
+            data.put("timestamp", time);
+            sendJson(out, 200, "OK", data);
         } else if ("/api/user".equals(cleanPath)) {
             String name = queryParams.get("name");
             if (name != null && !name.isEmpty()) {
-                // Simple HTML response with the name
-                String body = "<h1>User Profile</h1><p>Hello, " + escapeHtml(name) + "!</p>";
-                sendHtml(out, 200, "OK", body);
+                Map<String, String> data = new HashMap<>();
+                data.put("message", "Hello, " + name + "!");
+                data.put("name", name);
+                data.put("status", "active");
+                sendJson(out, 200, "OK", data);
             } else {
                 sendError(out, 400, "Missing 'name' parameter");
             }
+        } else if ("/api/users".equals(cleanPath)) {
+            // Example: Return a list of users (static for now)
+            String response = "{\"users\": [" +
+                    "{\"id\": 1, \"name\": \"Alice\", \"role\": \"admin\"}," +
+                    "{\"id\": 2, \"name\": \"Bob\", \"role\": \"user\"}" +
+                    "]}";
+            sendJson(out, 200, "OK", response);
+        } else if ("/about".equals(cleanPath)) {
+            String body = "<h1>About</h1><p>This is a custom Java HTTP server.</p>";
+            sendHtml(out, 200, "OK", body);
         } else {
             sendError(out, 404, "Not Found");
         }
     }
 
     private boolean serveStaticFile(PrintWriter out, String path) throws IOException {
-        // Map "/" to "index.html"
         String filePath = path;
         if ("/".equals(path)) {
             filePath = "/index.html";
         }
 
-        // Security: Prevent directory traversal (e.g., ../../etc/passwd)
         if (filePath.contains("..") || filePath.contains("\\")) {
             System.out.println("Blocked path: " + path);
             return false;
         }
 
-        // Load file from resources (webroot is in resources)
         String resourcePath = "webroot" + filePath;
-
         InputStream inputStream = getClass().getClassLoader().getResourceAsStream(resourcePath);
 
         if (inputStream != null) {
             byte[] fileBytes = inputStream.readAllBytes();
             inputStream.close();
 
-            // Determine content type (simple check)
             String contentType = "text/html";
             if (filePath.endsWith(".css")) {
                 contentType = "text/css";
@@ -139,25 +145,21 @@ public class RequestHandler implements Runnable {
                 contentType = "image/gif";
             }
 
-            // Build HTTP Headers
             String responseHeaders = "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: " + contentType + "\r\n" +
                     "Content-Length: " + fileBytes.length + "\r\n" +
                     "Connection: close\r\n" +
                     "\r\n";
 
-            // Write headers using PrintWriter
             out.print(responseHeaders);
             out.flush();
-
-            // Write body bytes directly to the socket's output stream
             socket.getOutputStream().write(fileBytes);
             socket.getOutputStream().close();
 
             return true;
         }
 
-        return false; // File not found
+        return false;
     }
 
     private void handlePost(PrintWriter out, String path, BufferedReader in) throws IOException {
@@ -167,7 +169,7 @@ public class RequestHandler implements Runnable {
             while ((line = in.readLine()) != null && !line.isEmpty()) {
                 bodyContent.append(line);
             }
-            String body = "<h1>Echo Response</h1><pre>" + escapeHtml(bodyContent.toString()) + "</pre>";
+            String body = "<h1>Echo Response</h1><pre>" + bodyContent.toString() + "</pre>";
             sendHtml(out, 200, "OK", body);
         } else {
             sendError(out, 404, "Not Found");
@@ -176,33 +178,58 @@ public class RequestHandler implements Runnable {
 
     private void sendHtml(PrintWriter out, int status, String statusText, String body) {
         byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
-
         String response = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
                 "Content-Type: text/html; charset=UTF-8\r\n" +
                 "Content-Length: " + bodyBytes.length + "\r\n" +
                 "Connection: close\r\n" +
                 "\r\n";
-
         out.print(response);
         out.write(body);
         out.flush();
     }
 
+    private void sendJson(PrintWriter out, int status, String statusText, String body) {
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+        String response = "HTTP/1.1 " + status + " " + statusText + "\r\n" +
+                "Content-Type: application/json; charset=UTF-8\r\n" +
+                "Content-Length: " + bodyBytes.length + "\r\n" +
+                "Connection: close\r\n" +
+                "\r\n";
+        out.print(response);
+        out.write(body);
+        out.flush();
+    }
+
+    private void sendJson(PrintWriter out, int status, String statusText, Map<String, String> data) {
+        StringBuilder json = new StringBuilder();
+        json.append("{");
+        int i = 0;
+        for (Map.Entry<String, String> entry : data.entrySet()) {
+            if (i > 0) {
+                json.append(",");
+            }
+            json.append("\"").append(keyEscape(entry.getKey())).append("\":\"").append(valueEscape(entry.getValue())).append("\"");
+            i++;
+        }
+        json.append("}");
+        sendJson(out, status, statusText, json.toString());
+    }
+
     private void sendError(PrintWriter out, int status, String message) {
-        String body = "<h1>Error " + status + "</h1><p>" + message + "</p>";
-        sendHtml(out, status, message, body);
+        Map<String, String> error = new HashMap<>();
+        error.put("error", message);
+        error.put("status", String.valueOf(status));
+        sendJson(out, status, "Error", error);
     }
 
-    private String escapeHtml(String input) {
-        return input.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;");
+    private String keyEscape(String key) {
+        return key.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
-    /**
-     * Parses a query string (e.g., "name=John&age=30") into a Map.
-     */
+    private String valueEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
+    }
+
     private Map<String, String> parseQueryString(String query) {
         Map<String, String> params = new HashMap<>();
         if (query == null || query.isEmpty()) {
