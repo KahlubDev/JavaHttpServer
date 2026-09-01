@@ -35,6 +35,8 @@ The project implements HTTP request handling over TCP sockets, manual request pa
 
 ## Project Structure
 
+```text
+
 
 JavaHttpServer/
 ├── src/
@@ -53,7 +55,7 @@ JavaHttpServer/
 │
 ├── README.md
 └── .gitignore
-
+```
 
 ### Core Components
 
@@ -324,9 +326,9 @@ WARN
 ERROR
 ```
 
-## What I Learned
+## What I Learnt
 
-This project was built to understand how an HTTP server works below the level of frameworks.
+This project was built to understand how a HTTP server works below the level of frameworks.
 
 Key areas include:
 
