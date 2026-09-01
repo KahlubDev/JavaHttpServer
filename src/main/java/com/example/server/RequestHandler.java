@@ -2,9 +2,12 @@ package com.example.server;
 
 import java.io.*;
 import java.net.Socket;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
 
 public class RequestHandler implements Runnable {
     private final Socket socket;
@@ -59,7 +62,7 @@ public class RequestHandler implements Runnable {
     }
 
     private void handleGet(PrintWriter out, String path) {
-        // Check if the path maps to a static file
+        // Check if the path maps to a static file first
         try {
             if (serveStaticFile(out, path)) {
                 return; // File was served, stop here
@@ -68,17 +71,33 @@ public class RequestHandler implements Runnable {
             System.err.println("Error serving file: " + e.getMessage());
         }
 
-        // Fallback to dynamic routes if file not found
-        if ("/".equals(path)) {
+        // Split path and query string (e.g., "/api/user?name=John" -> path="/api/user", query="name=John")
+        String[] parts = path.split("\\?", 2);
+        String cleanPath = parts[0];
+        String queryString = parts.length > 1 ? parts[1] : "";
+
+        Map<String, String> queryParams = parseQueryString(queryString);
+
+        // Route handling
+        if ("/".equals(cleanPath)) {
             String body = "<h1>Home Page</h1><p>Welcome to the Java HTTP Server.</p>";
             sendHtml(out, 200, "OK", body);
-        } else if ("/api/time".equals(path)) {
+        } else if ("/api/time".equals(cleanPath)) {
             String time = LocalDateTime.now().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
             String body = "<h1>Server Time</h1><p>" + time + "</p>";
             sendHtml(out, 200, "OK", body);
-        } else if ("/about".equals(path)) {
+        } else if ("/about".equals(cleanPath)) {
             String body = "<h1>About</h1><p>This is a custom Java HTTP server.</p>";
             sendHtml(out, 200, "OK", body);
+        } else if ("/api/user".equals(cleanPath)) {
+            String name = queryParams.get("name");
+            if (name != null && !name.isEmpty()) {
+                // Simple HTML response with the name
+                String body = "<h1>User Profile</h1><p>Hello, " + escapeHtml(name) + "!</p>";
+                sendHtml(out, 200, "OK", body);
+            } else {
+                sendError(out, 400, "Missing 'name' parameter");
+            }
         } else {
             sendError(out, 404, "Not Found");
         }
@@ -132,14 +151,13 @@ public class RequestHandler implements Runnable {
             out.flush();
 
             // Write body bytes directly to the socket's output stream
-            // We use the raw socket stream to handle binary data correctly
             socket.getOutputStream().write(fileBytes);
-            socket.getOutputStream().close(); // Close after writing
+            socket.getOutputStream().close();
 
             return true;
         }
 
-        return false; // File not found, let handleGet continue
+        return false; // File not found
     }
 
     private void handlePost(PrintWriter out, String path, BufferedReader in) throws IOException {
@@ -180,5 +198,26 @@ public class RequestHandler implements Runnable {
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
                 .replace("\"", "&quot;");
+    }
+
+    /**
+     * Parses a query string (e.g., "name=John&age=30") into a Map.
+     */
+    private Map<String, String> parseQueryString(String query) {
+        Map<String, String> params = new HashMap<>();
+        if (query == null || query.isEmpty()) {
+            return params;
+        }
+
+        String[] pairs = query.split("&");
+        for (String pair : pairs) {
+            int idx = pair.indexOf("=");
+            if (idx > 0) {
+                String key = URLDecoder.decode(pair.substring(0, idx), StandardCharsets.UTF_8);
+                String value = URLDecoder.decode(pair.substring(idx + 1), StandardCharsets.UTF_8);
+                params.put(key, value);
+            }
+        }
+        return params;
     }
 }
