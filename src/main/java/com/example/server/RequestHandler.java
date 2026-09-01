@@ -18,6 +18,9 @@ public class RequestHandler implements Runnable {
 
     @Override
     public void run() {
+        long startTime = System.currentTimeMillis();
+        String clientIp = socket.getInetAddress().getHostAddress();
+
         try (
                 BufferedReader in = new BufferedReader(
                         new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
@@ -29,7 +32,7 @@ public class RequestHandler implements Runnable {
                 return;
             }
 
-            System.out.println("Received: " + requestLine);
+            Logger.info("Client " + clientIp + " connected: " + requestLine);
 
             String[] parts = requestLine.split(" ");
             String method = parts[0];
@@ -50,13 +53,16 @@ public class RequestHandler implements Runnable {
                 sendError(out, 405, "Method Not Allowed");
             }
 
+            long duration = System.currentTimeMillis() - startTime;
+            Logger.info("Client " + clientIp + " request processed in " + duration + "ms");
+
         } catch (IOException e) {
-            System.err.println("Error handling client: " + e.getMessage());
+            Logger.error("Error handling client " + clientIp, e);
         } finally {
             try {
                 socket.close();
             } catch (IOException e) {
-                // Ignore close errors
+                Logger.warn("Error closing socket for client " + clientIp);
             }
         }
     }
@@ -68,7 +74,7 @@ public class RequestHandler implements Runnable {
                 return;
             }
         } catch (IOException e) {
-            System.err.println("Error serving file: " + e.getMessage());
+            Logger.error("Error serving static file: " + path, e);
         }
 
         // Split path and query string
@@ -80,7 +86,6 @@ public class RequestHandler implements Runnable {
 
         // Route handling
         if ("/".equals(cleanPath)) {
-            // Serve static index.html (handled above) or fallback
             String body = "<h1>Home Page</h1><p>Use <b>/api/time</b> or <b>/api/user?name=...</b> for API.</p>";
             sendHtml(out, 200, "OK", body);
         } else if ("/api/time".equals(cleanPath)) {
@@ -100,7 +105,6 @@ public class RequestHandler implements Runnable {
                 sendError(out, 400, "Missing 'name' parameter");
             }
         } else if ("/api/users".equals(cleanPath)) {
-            // Example: Return a list of users (static for now)
             String response = "{\"users\": [" +
                     "{\"id\": 1, \"name\": \"Alice\", \"role\": \"admin\"}," +
                     "{\"id\": 2, \"name\": \"Bob\", \"role\": \"user\"}" +
@@ -121,7 +125,7 @@ public class RequestHandler implements Runnable {
         }
 
         if (filePath.contains("..") || filePath.contains("\\")) {
-            System.out.println("Blocked path: " + path);
+            Logger.warn("Blocked path attempt: " + path);
             return false;
         }
 
@@ -144,6 +148,8 @@ public class RequestHandler implements Runnable {
             } else if (filePath.endsWith(".gif")) {
                 contentType = "image/gif";
             }
+
+            Logger.info("Serving static file: " + filePath);
 
             String responseHeaders = "HTTP/1.1 200 OK\r\n" +
                     "Content-Type: " + contentType + "\r\n" +
